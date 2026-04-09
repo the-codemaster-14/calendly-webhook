@@ -1,6 +1,7 @@
 const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
 const { Client, GatewayIntentBits } = require('discord.js');
+console.log('WEBHOOK VERSION 2');
 
 const app = express();
 app.use(express.json());
