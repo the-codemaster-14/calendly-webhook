@@ -32,7 +32,7 @@ function formatDateTime(startTime) {
   };
 }
 
-app.get('/', (req, res) => {
+app.get('/', (_req, res) => {
   res.send('Webhook is live');
 });
 
@@ -48,17 +48,22 @@ app.post('/calendly-webhook', async (req, res) => {
     const email = payload.email?.toLowerCase();
     const startTime = payload.scheduled_event?.start_time;
 
-    const { data: client } = await supabase
+    const { data: client, error: fetchError } = await supabase
       .from('clients')
       .select('*')
       .eq('email', email)
       .maybeSingle();
 
+    if (fetchError) {
+      console.error(fetchError);
+      return res.status(500).send('Database fetch error');
+    }
+
     if (!client) {
       return res.status(200).send('Client not found');
     }
 
-    const { data: updated } = await supabase
+    const { data: updated, error: updateError } = await supabase
       .from('clients')
       .update({
         sessions_used: client.sessions_used + 1,
@@ -67,6 +72,11 @@ app.post('/calendly-webhook', async (req, res) => {
       .eq('email', email)
       .select()
       .single();
+
+    if (updateError) {
+      console.error(updateError);
+      return res.status(500).send('Database update error');
+    }
 
     const remaining = updated.sessions_total - updated.sessions_used;
     const { date, time } = formatDateTime(startTime);
@@ -83,7 +93,6 @@ Booked this month: ${updated.booked_this_month}`;
     await channel.send(message);
 
     res.status(200).send('Success');
-
   } catch (err) {
     console.error(err);
     res.status(500).send('Error');
