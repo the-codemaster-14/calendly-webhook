@@ -12,6 +12,25 @@ const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
+async function createClientRecord({ name, email }) {
+  const { data, error } = await supabase
+    .from('clients')
+    .insert([{
+      name,
+      phone: '',
+      email: email.toLowerCase(),
+      sessions_used: 0,
+      sessions_total: DEFAULT_NEW_CLIENT_SESSIONS,
+      booked_this_month: 0,
+      last_reset_month: currentMonthKey(),
+      notes: ''
+    }])
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
 
 const discord = new Client({
   intents: [GatewayIntentBits.Guilds]
