@@ -53,9 +53,20 @@ discord.login(process.env.BOT_TOKEN);
 
 function formatDateTime(startTime) {
   const dt = new Date(startTime);
+
   return {
-    date: dt.toLocaleDateString(),
-    time: dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    date: new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Toronto',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(dt),
+    time: new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Toronto',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    }).format(dt)
   };
 }
 
