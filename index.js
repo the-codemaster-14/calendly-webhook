@@ -12,25 +12,6 @@ const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
-async function createClientRecord({ name, email }) {
-  const { data, error } = await supabase
-    .from('clients')
-    .insert([{
-      name,
-      phone: '',
-      email: email.toLowerCase(),
-      sessions_used: 0,
-      sessions_total: DEFAULT_NEW_CLIENT_SESSIONS,
-      booked_this_month: 0,
-      last_reset_month: currentMonthKey(),
-      notes: ''
-    }])
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
-}
 
 const discord = new Client({
   intents: [GatewayIntentBits.Guilds]
@@ -38,18 +19,17 @@ const discord = new Client({
 
 const BOOKING_CHANNEL_ID = process.env.BOOKING_CHANNEL_ID;
 
+const ALLOWED_EVENT_LOCATIONS = {
+  'The Toronto Content Lab (North York)': 'North York',
+  'The Toronto Content Lab (Mississauga)': 'Mississauga'
+};
+
 function currentMonthKey() {
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
   return `${year}-${month}`;
 }
-
-discord.once('ready', () => {
-  console.log(`Discord helper logged in as ${discord.user.tag}`);
-});
-
-discord.login(process.env.BOT_TOKEN);
 
 function formatDateTime(startTime) {
   const dt = new Date(startTime);
@@ -68,6 +48,18 @@ function formatDateTime(startTime) {
       hour12: true
     }).format(dt)
   };
+}
+
+function getEventName(payload) {
+  return String(
+    payload.scheduled_event?.name ||
+    payload.event_type?.name ||
+    ''
+  ).trim();
+}
+
+function getEventLocation(eventName) {
+  return ALLOWED_EVENT_LOCATIONS[eventName] || '';
 }
 
 async function getClientByEmail(email) {
@@ -91,7 +83,8 @@ async function createClientRecord({ name, email }) {
       sessions_used: 0,
       sessions_total: DEFAULT_NEW_CLIENT_SESSIONS,
       booked_this_month: 0,
-      last_reset_month: currentMonthKey()
+      last_reset_month: currentMonthKey(),
+      notes: ''
     }])
     .select()
     .single();
@@ -118,22 +111,26 @@ async function sendDiscordMessage(text) {
 }
 
 function getUsageStatusMessage(c) {
-  const remaining = c.sessions_total - c.sessions_used;
-
   if (c.sessions_used > c.sessions_total) {
-    return `❌ Over limit. This client is at ${c.sessions_used}/${c.sessions_total}.`;
+    return `Over limit. This client is at ${c.sessions_used}/${c.sessions_total}.`;
   }
 
   if (c.sessions_used === c.sessions_total) {
-    return `❗ Limit reached. This client is at ${c.sessions_used}/${c.sessions_total}.`;
+    return `Limit reached. This client is at ${c.sessions_used}/${c.sessions_total}.`;
   }
 
   if (c.sessions_used === c.sessions_total - 1) {
-    return `⚠ Renewal soon. This client is at ${c.sessions_used}/${c.sessions_total}.`;
+    return `Renewal soon. This client is at ${c.sessions_used}/${c.sessions_total}.`;
   }
 
-  return `Sessions remaining: ${remaining}`;
+  return '';
 }
+
+discord.once('ready', () => {
+  console.log(`Discord helper logged in as ${discord.user.tag}`);
+});
+
+discord.login(process.env.BOT_TOKEN);
 
 app.get('/', (_req, res) => {
   res.send('Webhook is live');
@@ -148,6 +145,13 @@ app.post('/calendly-webhook', async (req, res) => {
     }
 
     const payload = req.body.payload || {};
+    const eventName = getEventName(payload);
+    const location = getEventLocation(eventName);
+
+    if (!location) {
+      return res.status(200).send(`Ignored event: ${eventName || 'Unknown event'}`);
+    }
+
     const email = payload.email?.toLowerCase();
     const startTime = payload.scheduled_event?.start_time;
     const name = payload.name || 'New Client';
@@ -162,7 +166,7 @@ app.post('/calendly-webhook', async (req, res) => {
       client = await createClientRecord({ name, email });
 
       await sendDiscordMessage(
-`🆕 Auto-created new client from Calendly booking.
+`New client
 
 Name: ${client.name}
 Email: ${client.email}
@@ -172,7 +176,7 @@ Default sessions: ${client.sessions_total}`
 
     if (client.sessions_used >= client.sessions_total) {
       await sendDiscordMessage(
-`❌ Booking alert: ${client.name} booked, but they are already at ${client.sessions_used}/${client.sessions_total}.
+`Booking alert: ${client.name} booked, but they are already at ${client.sessions_used}/${client.sessions_total}.
 
 Email: ${client.email}
 Please review or renew this client manually.`
@@ -187,17 +191,18 @@ Please review or renew this client manually.`
       last_reset_month: currentMonthKey()
     });
 
-    const remaining = updated.sessions_total - updated.sessions_used;
     const { date, time } = formatDateTime(startTime);
+    const statusMessage = getUsageStatusMessage(updated);
 
-    const message =
-`${updated.name} has booked for ${date} at ${time}.
-Sessions remaining: ${remaining}
-
-Email: ${updated.email}
-Phone: ${updated.phone || ''}
-Booked this month: ${updated.booked_this_month}
-${getUsageStatusMessage(updated)}`;
+    const message = [
+      'New studio booking',
+      '',
+      `Name: ${updated.name}`,
+      `Date: ${date}`,
+      `Time: ${time}`,
+      `Location: ${location}`,
+      statusMessage ? `Note: ${statusMessage}` : ''
+    ].filter(Boolean).join('\n');
 
     await sendDiscordMessage(message);
 
